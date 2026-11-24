@@ -1,0 +1,1577 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>极简思维导图</title>
+  <style>
+    :root {
+      --canvas-bg: #f7f6f2;
+      --dot-color: rgba(24, 30, 38, 0.11);
+      --toolbar-bg: rgba(255, 255, 255, 0.88);
+      --toolbar-border: rgba(24, 30, 38, 0.09);
+      --ink: #1e242b;
+      --ink-sub: #5d6773;
+      --ink-muted: #8f99a6;
+      --node-bg: #ffffff;
+      --node-border: #dce2e8;
+      --root-bg: #1f2933;
+      --root-ink: #ffffff;
+      --accent: #24726e;
+      --accent-soft: rgba(36, 114, 110, 0.14);
+      --line-default: #b5c0cb;
+      --shadow-sm: 0 4px 14px rgba(20, 28, 38, 0.06);
+      --shadow-md: 0 10px 28px rgba(20, 28, 38, 0.1);
+    }
+
+    body[data-theme="pure"] {
+      --canvas-bg: #ffffff;
+      --dot-color: rgba(24, 30, 38, 0.09);
+      --node-bg: #ffffff;
+      --node-border: #e2e7ed;
+    }
+
+    body[data-theme="dark"] {
+      --canvas-bg: #151921;
+      --dot-color: rgba(255, 255, 255, 0.09);
+      --toolbar-bg: rgba(28, 34, 45, 0.88);
+      --toolbar-border: rgba(255, 255, 255, 0.1);
+      --ink: #ecf0f5;
+      --ink-sub: #a6b2c0;
+      --ink-muted: #6f7c8c;
+      --node-bg: #202734;
+      --node-border: #333e50;
+      --root-bg: #2a8580;
+      --root-ink: #ffffff;
+      --accent: #4db8b2;
+      --accent-soft: rgba(77, 184, 178, 0.2);
+      --line-default: #4b586b;
+      --shadow-sm: 0 6px 18px rgba(0, 0, 0, 0.28);
+      --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--canvas-bg);
+      color: var(--ink);
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* 无限点阵画布 */
+    #viewport {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      cursor: grab;
+      background-color: var(--canvas-bg);
+      background-image: radial-gradient(var(--dot-color) 1.25px, transparent 1.25px);
+      background-size: 24px 24px;
+    }
+
+    #viewport.panning {
+      cursor: grabbing;
+    }
+
+    #world {
+      position: absolute;
+      left: 0;
+      top: 0;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+
+    #edgesSvg {
+      position: absolute;
+      left: 0;
+      top: 0;
+      overflow: visible;
+      pointer-events: none;
+    }
+
+    #nodesLayer {
+      position: absolute;
+      left: 0;
+      top: 0;
+    }
+
+    /* 节点样式 */
+    .mm-node {
+      position: absolute;
+      display: inline-flex;
+      align-items: center;
+      width: max-content;
+      min-width: 112px;
+      max-width: 480px;
+      padding: 13px 22px;
+      border-radius: 13px;
+      background: var(--node-bg);
+      border: 1.6px solid var(--node-border);
+      color: var(--ink);
+      font-size: 15.5px;
+      font-weight: 500;
+      line-height: 1.85;
+      box-shadow: var(--shadow-sm);
+      cursor: pointer;
+      transition: box-shadow 0.16s ease, border-color 0.16s ease;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
+    .mm-node:hover {
+      border-color: var(--accent);
+    }
+
+    .mm-node.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3.5px var(--accent-soft), var(--shadow-sm);
+      z-index: 5;
+    }
+
+    .mm-node.is-root {
+      padding: 17px 32px;
+      border-radius: 16px;
+      background: var(--root-bg);
+      color: var(--root-ink);
+      border-color: transparent;
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.75;
+      letter-spacing: 0.03em;
+      min-width: 132px;
+      max-width: 480px;
+      box-shadow: var(--shadow-md);
+    }
+
+    .mm-node.is-root.selected {
+      box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow-md);
+    }
+
+    .mm-node.depth-1 {
+      font-size: 17px;
+      font-weight: 600;
+      line-height: 1.8;
+      padding: 14px 24px;
+      min-width: 118px;
+      max-width: 440px;
+      border-radius: 14px;
+    }
+
+    .mm-node-text {
+      outline: none;
+      min-width: 24px;
+      cursor: inherit;
+    }
+
+    .mm-node.editing {
+      cursor: text;
+      user-select: text;
+      z-index: 10;
+    }
+
+    .mm-node.editing .mm-node-text {
+      cursor: text;
+    }
+
+    /* 折叠/展开徽章 */
+    .collapse-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 1.5px solid var(--node-border);
+      background: var(--node-bg);
+      color: var(--ink-sub);
+      font-size: 11px;
+      font-weight: 700;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      z-index: 6;
+      transition: all 0.15s ease;
+    }
+
+    .collapse-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      transform: translateY(-50%) scale(1.12);
+    }
+
+    .collapse-btn.side-right { right: -26px; }
+    .collapse-btn.side-left { left: -26px; }
+
+    /* 顶部悬浮工具栏 */
+    .topbar {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: var(--toolbar-bg);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--toolbar-border);
+      box-shadow: var(--shadow-md);
+      max-width: calc(100vw - 24px);
+      overflow-x: auto;
+    }
+
+    .tb-btn {
+      border: none;
+      background: transparent;
+      color: var(--ink);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 11px;
+      border-radius: 999px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .tb-btn:hover:not(:disabled) {
+      background: rgba(128, 140, 155, 0.14);
+    }
+
+    .tb-btn:disabled {
+      opacity: 0.36;
+      cursor: not-allowed;
+    }
+
+    .tb-btn.primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .tb-btn.primary:hover {
+      opacity: 0.92;
+      background: var(--accent);
+    }
+
+    .tb-btn.danger:hover:not(:disabled) {
+      color: #d9534f;
+      background: rgba(217, 83, 79, 0.12);
+    }
+
+    .sep {
+      width: 1px;
+      height: 18px;
+      background: var(--toolbar-border);
+      flex-shrink: 0;
+    }
+
+    /* 节点颜色选择点 */
+    .color-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0 4px;
+    }
+
+    .c-dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.85);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+      cursor: pointer;
+      transition: transform 0.15s ease;
+    }
+
+    .c-dot:hover {
+      transform: scale(1.22);
+    }
+
+    /* 导出下拉菜单 */
+    .dropdown-wrap {
+      position: fixed;
+      top: 66px;
+      right: 20px;
+      z-index: 40;
+      background: var(--toolbar-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--toolbar-border);
+      border-radius: 14px;
+      padding: 6px;
+      box-shadow: var(--shadow-md);
+      display: none;
+      min-width: 176px;
+    }
+
+    .dropdown-wrap.open {
+      display: grid;
+      gap: 2px;
+    }
+
+    .dd-item {
+      border: none;
+      background: transparent;
+      color: var(--ink);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 12px;
+      border-radius: 9px;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .dd-item:hover {
+      background: rgba(128, 140, 155, 0.14);
+    }
+
+    .dd-sub {
+      font-size: 11px;
+      color: var(--ink-muted);
+    }
+
+    /* 左下角快捷键轻提示 */
+    .shortcut-bar {
+      position: fixed;
+      left: 18px;
+      bottom: 16px;
+      z-index: 25;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 7px 14px;
+      border-radius: 999px;
+      background: var(--toolbar-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--toolbar-border);
+      font-size: 12px;
+      color: var(--ink-sub);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .shortcut-bar kbd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 5px;
+      background: rgba(128, 140, 155, 0.15);
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    /* 右下角缩放控制 */
+    .zoom-bar {
+      position: fixed;
+      right: 18px;
+      bottom: 16px;
+      z-index: 25;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 8px;
+      border-radius: 999px;
+      background: var(--toolbar-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--toolbar-border);
+      box-shadow: var(--shadow-sm);
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+
+    .zoom-bar button {
+      border: none;
+      background: transparent;
+      color: var(--ink);
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      display: grid;
+      place-items: center;
+    }
+
+    .zoom-bar button:hover {
+      background: rgba(128, 140, 155, 0.15);
+    }
+
+    #zoomLabel {
+      min-width: 44px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--ink-sub);
+      cursor: pointer;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 66px;
+      left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      background: var(--ink);
+      color: var(--canvas-bg);
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 8px 16px;
+      border-radius: 999px;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.22s ease;
+      z-index: 50;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    @media (max-width: 760px) {
+      .shortcut-bar { display: none; }
+    }
+  </style>
+</head>
+<body data-theme="warm">
+  <!-- 顶部悬浮工具栏 -->
+  <div class="topbar" role="toolbar" aria-label="思维导图工具栏">
+    <button class="tb-btn primary" id="addChildBtn" type="button" title="快捷键 Tab">+ 子节点</button>
+    <button class="tb-btn" id="addSiblingBtn" type="button" title="快捷键 Enter" disabled="">+ 同级</button>
+    <button class="tb-btn danger" id="deleteBtn" type="button" title="快捷键 Delete" disabled="">删除</button>
+    <div class="sep"></div>
+    <button class="tb-btn" id="undoBtn" type="button" title="撤销 Cmd/Ctrl+Z" disabled="">↩</button>
+    <button class="tb-btn" id="redoBtn" type="button" title="重做 Cmd/Ctrl+Shift+Z" disabled="">↪</button>
+    <div class="sep"></div>
+    <div class="color-dots" title="标记当前节点颜色">
+      <span class="c-dot" data-color="" style="background:#ffffff;" title="默认无色"></span>
+      <span class="c-dot" data-color="#24726e" style="background:#24726e;" title="青色"></span>
+      <span class="c-dot" data-color="#d46542" style="background:#d46542;" title="暖橙"></span>
+      <span class="c-dot" data-color="#3e64b0" style="background:#3e64b0;" title="靛蓝"></span>
+      <span class="c-dot" data-color="#c48a28" style="background:#c48a28;" title="琥珀"></span>
+      <span class="c-dot" data-color="#8b5ca8" style="background:#8b5ca8;" title="丁香紫"></span>
+    </div>
+    <div class="sep"></div>
+    <button class="tb-btn" id="layoutBtn" type="button" title="切换排版方向">布局：向右</button>
+    <button class="tb-btn" id="themeBtn" type="button" title="切换画布主题">主题：米白</button>
+    <div class="sep"></div>
+    <button class="tb-btn" id="menuBtn" type="button">文件 / 导出 ▾</button>
+  </div>
+
+  <!-- 文件与导出菜单 -->
+  <div class="dropdown-wrap" id="fileMenu">
+    <button class="dd-item" id="newMapBtn" type="button">新建空白导图 <span class="dd-sub">清空</span></button>
+    <button class="dd-item" id="exportPngBtn" type="button">导出高清图片 <span class="dd-sub">PNG</span></button>
+    <button class="dd-item" id="exportSvgBtn" type="button">导出矢量图 <span class="dd-sub">SVG</span></button>
+    <button class="dd-item" id="exportMdBtn" type="button">导出大纲文档 <span class="dd-sub">MD</span></button>
+    <button class="dd-item" id="exportJsonBtn" type="button">保存项目文件 <span class="dd-sub">JSON</span></button>
+    <button class="dd-item" id="importJsonBtn" type="button">导入项目文件 <span class="dd-sub">JSON</span></button>
+  </div>
+  <input type="file" id="jsonFileInput" accept=".json" style="display:none;">
+
+  <!-- 无限画布 -->
+  <div id="viewport">
+    <div id="world">
+      <svg id="edgesSvg"></svg>
+      <div id="nodesLayer"></div>
+    </div>
+  </div>
+
+  <!-- 底部快捷键提示 -->
+  <div class="shortcut-bar">
+    <span><kbd>双击</kbd> 编辑</span>
+    <span><kbd>Tab</kbd> 子节点</span>
+    <span><kbd>Enter</kbd> 同级节点</span>
+    <span><kbd>Del</kbd> 删除</span>
+    <span><kbd>拖拽空白</kbd> 移动画布</span>
+  </div>
+
+  <!-- 缩放控制 -->
+  <div class="zoom-bar">
+    <button id="zoomOutBtn" type="button" title="缩小">−</button>
+    <span id="zoomLabel" title="点击重置缩放并居中">100%</span>
+    <button id="zoomInBtn" type="button" title="放大">+</button>
+    <button id="fitBtn" type="button" title="居中适配画面">⌖</button>
+  </div>
+
+  <div class="toast" id="toast">已保存</div>
+
+  <script>
+    (function () {
+      const STORAGE_KEY = "minimal_mindmap_data_v1";
+      const SVG_NS = "http://www.w3.org/2000/svg";
+
+      const THEMES = [
+        { key: "warm", label: "米白" },
+        { key: "pure", label: "纯白" },
+        { key: "dark", label: "深夜" }
+      ];
+
+      // 空白导图模板（点击“新建空白导图”时使用）
+      function createBlankRoot() {
+        return {
+          id: "root",
+          text: "中心主题",
+          color: "",
+          collapsed: false,
+          children: []
+        };
+      }
+
+      // 首次访问时显示原文件里保存的完整导图。
+      function createPreservedRoot() {
+        return {
+          "id": "root",
+          "text": "3C数码显示屏",
+          "color": "",
+          "collapsed": false,
+          "children": [
+            {
+              "id": "n_ucf4z1qcpi",
+              "text": "感兴趣",
+              "color": "",
+              "collapsed": false,
+              "children": [
+                {
+                  "id": "n_e8p1d7mhim",
+                  "text": "下班太累点个烧烤看着电影多惬意啊",
+                  "color": "",
+                  "collapsed": false,
+                  "children": [
+                    {
+                      "id": "n_pyh81bcjhl",
+                      "text": "镜头从加班回家推门开灯开始，关掉顶灯、摆上刚到的烧烤和冰可乐，打开高刷大屏播一部老电影。用细腻的暗部细节和广色域特写，把出租屋瞬间变成私人影院。不硬夸参数，只传递“打工再累，回到这一平米就能彻底治愈”的松弛感，让观众看完立刻种草同款氛围。",
+                      "color": "",
+                      "collapsed": false,
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "n_gaszi3rjvd",
+                  "text": "周末睡什么觉起来耍两把黑猴",
+                  "color": "",
+                  "collapsed": false,
+                  "children": [
+                    {
+                      "id": "n_2xoj8kaju7",
+                      "text": "周六清晨拉开窗帘，泡杯冰美式开机直奔《黑神话：悟空》。特写 Boss 战里金箍棒挥出的火星、毛发质感与流畅连招，顺带对比小屏笔记本的局促感。全程突出“大屏高刷 + 沉浸光影”带来的爽感，结尾一句“周末最好的休息不是赖床，是爽打两把”，精准戳中游戏党心痒点。",
+                      "color": "",
+                      "collapsed": false,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "n_qiijji6hnw",
+              "text": "造需求",
+              "color": "",
+              "collapsed": false,
+              "children": [
+                {
+                  "id": "n_pdwdskjkuj",
+                  "text": "修图做图 PPT 总被甲方说偏色",
+                  "color": "",
+                  "collapsed": false,
+                  "children": [
+                    {
+                      "id": "n_vrsg8pizao",
+                      "text": "开头还原职场崩溃瞬间：熬夜改了三版海报/PPT，自己电脑看着高级，发到甲方手机上却发灰偏绿惨遭打回。随即点出元凶——普通廉价屏幕色域不全、色准太差。切到高色准专业屏同画面对比，色差肉眼可见消失，帮打工人把“买好屏幕”从消费升级变成保命刚需。",
+                      "color": "",
+                      "collapsed": false,
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "n_induvclm4d",
+                  "text": "玩个一上午眼睛酸的不行（烂屏幕）",
+                  "color": "",
+                  "collapsed": false,
+                  "children": [
+                    {
+                      "id": "n_lvsh61gdek",
+                      "text": "以第一视角记录周末连打三小时游戏或盯表格后，眼睛干涩、发胀、流泪的难受状态。顺手用手机慢动作拍下老屏幕肉眼看不见的频闪与刺眼蓝光，揭露“伤眼的不是看屏幕，是烂屏幕”。自然引出硬件低蓝光、不闪屏和细腻画质的重要性，让用户产生立刻换掉旧屏的紧迫感。",
+                      "color": "",
+                      "collapsed": false,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "n_mrevp453pf",
+              "text": "被选择",
+              "color": "",
+              "collapsed": false,
+              "children": [
+                {
+                  "id": "n_8rrpycgnbw",
+                  "text": "EDG比赛夺冠了（用的就是这个显示屏）",
+                  "color": "",
+                  "collapsed": false,
+                  "children": [
+                    {
+                      "id": "n_bh4439tl06",
+                      "text": "借势 EDG 夺冠高燃瞬间切入，定格赛场选手特写，抛出悬念：“职业选手毫秒必争的决胜时刻，面前摆的是哪块屏？”接着拆解同款显示屏的超高刷新率、极速响应和暗部增强实战表现，把“冠军同款”转化为最强专业背书，消除观众对性能的最后顾虑，直接给出入手型号。",
+                      "color": "",
+                      "collapsed": false,
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "n_f22gdq2omn",
+                  "text": "去朋友家玩被推荐（对比差异）",
+                  "color": "",
+                  "collapsed": false,
+                  "children": [
+                    {
+                      "id": "n_ayvz873rjt",
+                      "text": "用真实生活剧情展开：去朋友家开黑，本来觉得自己家那块 60Hz 老屏幕“还能用”，结果在朋友的 2K 高刷屏上试玩十分钟，画面丝滑度和通透感直接降维打击。回家再看自己的旧屏瞬间觉得“糊成马赛克”。借朋友随口安利的价格与体验，完成“没有对比就没有伤害”的临门一脚转化。",
+                      "color": "",
+                      "collapsed": false,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        };
+      }
+
+      const state = {
+        root: createPreservedRoot(),
+        selectedId: "root",
+        editingId: null,
+        layout: "right", // "right" | "both"
+        themeIdx: 0,
+        panX: 0,
+        panY: 0,
+        scale: 1,
+        undoStack: [],
+        redoStack: [],
+        nodeRects: new Map(), // id -> { x, y, w, h, side, depth }
+        layoutNodes: new Map() // id -> node
+      };
+
+      // DOM 引用
+      const viewport = document.getElementById("viewport");
+      const world = document.getElementById("world");
+      const edgesSvg = document.getElementById("edgesSvg");
+      const nodesLayer = document.getElementById("nodesLayer");
+      const zoomLabel = document.getElementById("zoomLabel");
+      const fileMenu = document.getElementById("fileMenu");
+      const toastEl = document.getElementById("toast");
+
+      const addChildBtn = document.getElementById("addChildBtn");
+      const addSiblingBtn = document.getElementById("addSiblingBtn");
+      const deleteBtn = document.getElementById("deleteBtn");
+      const undoBtn = document.getElementById("undoBtn");
+      const redoBtn = document.getElementById("redoBtn");
+      const layoutBtn = document.getElementById("layoutBtn");
+      const themeBtn = document.getElementById("themeBtn");
+      const menuBtn = document.getElementById("menuBtn");
+
+      // ==================== 工具函数 ====================
+      function uid() {
+        return "n_" + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
+      }
+
+      function cloneTree(node) {
+        return JSON.parse(JSON.stringify(node));
+      }
+
+      function showToast(msg) {
+        toastEl.textContent = msg;
+        toastEl.classList.add("show");
+        clearTimeout(showToast._t);
+        showToast._t = setTimeout(() => toastEl.classList.remove("show"), 1800);
+      }
+
+      function findNodeAndParent(id, current = state.root, parent = null) {
+        if (current.id === id) return { node: current, parent };
+        for (const child of current.children) {
+          const found = findNodeAndParent(id, child, current);
+          if (found) return found;
+        }
+        return null;
+      }
+
+      function countDescendants(node) {
+        let total = 0;
+        for (const c of node.children) {
+          total += 1 + countDescendants(c);
+        }
+        return total;
+      }
+
+      // ==================== 持久化与历史栈 ====================
+      function persist() {
+        try {
+          localStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({
+              root: state.root,
+              layout: state.layout,
+              themeIdx: state.themeIdx
+            })
+          );
+        } catch (_) {}
+      }
+
+      function loadPersisted() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.root && parsed.root.id) {
+            state.root = parsed.root;
+            if (parsed.layout === "right" || parsed.layout === "both") state.layout = parsed.layout;
+            if (typeof parsed.themeIdx === "number" && THEMES[parsed.themeIdx]) {
+              state.themeIdx = parsed.themeIdx;
+            }
+          }
+        } catch (_) {}
+      }
+
+      function pushHistory() {
+        state.undoStack.push(cloneTree(state.root));
+        if (state.undoStack.length > 60) state.undoStack.shift();
+        state.redoStack = [];
+        updateToolbarState();
+      }
+
+      function undo() {
+        if (!state.undoStack.length) return;
+        state.redoStack.push(cloneTree(state.root));
+        state.root = state.undoStack.pop();
+        if (!findNodeAndParent(state.selectedId)) state.selectedId = "root";
+        state.editingId = null;
+        persist();
+        render();
+      }
+
+      function redo() {
+        if (!state.redoStack.length) return;
+        state.undoStack.push(cloneTree(state.root));
+        state.root = state.redoStack.pop();
+        if (!findNodeAndParent(state.selectedId)) state.selectedId = "root";
+        state.editingId = null;
+        persist();
+        render();
+      }
+
+      // ==================== 视口变换 ====================
+      function applyTransform() {
+        world.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.scale})`;
+        zoomLabel.textContent = `${Math.round(state.scale * 100)}%`;
+        viewport.style.backgroundPosition = `${state.panX}px ${state.panY}px`;
+      }
+
+      function centerView(resetScale = false) {
+        if (resetScale) state.scale = 1;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        state.nodeRects.forEach((r) => {
+          minX = Math.min(minX, r.x);
+          maxX = Math.max(maxX, r.x + r.w);
+          minY = Math.min(minY, r.y);
+          maxY = Math.max(maxY, r.y + r.h);
+        });
+        if (!isFinite(minX)) return;
+        const bw = maxX - minX;
+        const bh = maxY - minY;
+        const vw = viewport.clientWidth;
+        const vh = viewport.clientHeight;
+
+        if (!resetScale && (bw > vw * 0.85 || bh > vh * 0.78)) {
+          const sx = (vw * 0.82) / bw;
+          const sy = (vh * 0.74) / bh;
+          state.scale = Math.max(0.35, Math.min(1, Math.min(sx, sy)));
+        }
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        state.panX = vw / 2 - cx * state.scale;
+        state.panY = vh / 2 - cy * state.scale;
+        applyTransform();
+      }
+
+      // ==================== 自动树形排版与渲染 ====================
+      const H_GAP = 88;
+      const V_GAP = 26;
+
+      function createNodeEl(node, depth) {
+        const div = document.createElement("div");
+        div.className = "mm-node";
+        if (depth === 0) div.classList.add("is-root");
+        else if (depth === 1) div.classList.add("depth-1");
+        if (node.id === state.selectedId) div.classList.add("selected");
+        if (node.id === state.editingId) div.classList.add("editing");
+        div.dataset.id = node.id;
+
+        if (node.color && depth > 0) {
+          div.style.borderColor = node.color;
+          div.style.borderLeftWidth = "4.5px";
+        } else if (node.color && depth === 0) {
+          div.style.background = node.color;
+        }
+
+        const span = document.createElement("div");
+        span.className = "mm-node-text";
+        span.textContent = node.text || " ";
+        div.appendChild(span);
+
+        return { div, span };
+      }
+
+      function render() {
+        nodesLayer.innerHTML = "";
+        edgesSvg.innerHTML = "";
+        state.nodeRects.clear();
+        state.layoutNodes.clear();
+
+        // 1. 先把所有可见节点挂到 DOM，精确测量实际尺寸
+        const domMap = new Map();
+        const sizeMap = new Map();
+
+        function mountVisible(node, depth) {
+          state.layoutNodes.set(node.id, node);
+          const { div, span } = createNodeEl(node, depth);
+          div.style.left = "0px";
+          div.style.top = "0px";
+          nodesLayer.appendChild(div);
+          domMap.set(node.id, { div, span, depth });
+          sizeMap.set(node.id, {
+            w: Math.ceil(div.offsetWidth),
+            h: Math.ceil(div.offsetHeight)
+          });
+          if (!node.collapsed) {
+            node.children.forEach((c) => mountVisible(c, depth + 1));
+          }
+        }
+        mountVisible(state.root, 0);
+
+        // 2. 计算子树高度
+        const subtreeH = new Map();
+        function calcSubtreeHeight(node) {
+          const sz = sizeMap.get(node.id);
+          if (node.collapsed || !node.children.length) {
+            subtreeH.set(node.id, sz.h);
+            return sz.h;
+          }
+          let sum = 0;
+          node.children.forEach((c, idx) => {
+            sum += calcSubtreeHeight(c);
+            if (idx > 0) sum += V_GAP;
+          });
+          const h = Math.max(sz.h, sum);
+          subtreeH.set(node.id, h);
+          return h;
+        }
+
+        // 3. 递归定位
+        function placeBranch(node, x, centerY, side, depth) {
+          const sz = sizeMap.get(node.id);
+          const nx = side === "right" ? x : x - sz.w;
+          const ny = centerY - sz.h / 2;
+          state.nodeRects.set(node.id, { x: nx, y: ny, w: sz.w, h: sz.h, side, depth });
+
+          if (node.collapsed || !node.children.length) return;
+          let childrenTotalH = 0;
+          node.children.forEach((c, idx) => {
+            childrenTotalH += subtreeH.get(c.id);
+            if (idx > 0) childrenTotalH += V_GAP;
+          });
+          let curY = centerY - childrenTotalH / 2;
+          const childX = side === "right" ? nx + sz.w + H_GAP : nx - H_GAP;
+          node.children.forEach((c) => {
+            const ch = subtreeH.get(c.id);
+            placeBranch(c, childX, curY + ch / 2, side, depth + 1);
+            curY += ch + V_GAP;
+          });
+        }
+
+        const rootSz = sizeMap.get(state.root.id);
+        state.nodeRects.set(state.root.id, {
+          x: -rootSz.w / 2,
+          y: -rootSz.h / 2,
+          w: rootSz.w,
+          h: rootSz.h,
+          side: "center",
+          depth: 0
+        });
+
+        if (!state.root.collapsed && state.root.children.length) {
+          const rightChildren = [];
+          const leftChildren = [];
+
+          if (state.layout === "right") {
+            rightChildren.push(...state.root.children);
+          } else {
+            state.root.children.forEach((c, idx) => {
+              if (idx % 2 === 0) rightChildren.push(c);
+              else leftChildren.push(c);
+            });
+          }
+
+          // 右侧分支
+          if (rightChildren.length) {
+            let totalR = 0;
+            rightChildren.forEach((c, i) => {
+              totalR += calcSubtreeHeight(c);
+              if (i > 0) totalR += V_GAP + 6;
+            });
+            let cy = -totalR / 2;
+            rightChildren.forEach((c) => {
+              const ch = subtreeH.get(c.id);
+              placeBranch(c, rootSz.w / 2 + H_GAP + 10, cy + ch / 2, "right", 1);
+              cy += ch + V_GAP + 6;
+            });
+          }
+
+          // 左侧分支（左右发散模式）
+          if (leftChildren.length) {
+            let totalL = 0;
+            leftChildren.forEach((c, i) => {
+              totalL += calcSubtreeHeight(c);
+              if (i > 0) totalL += V_GAP + 6;
+            });
+            let cy = -totalL / 2;
+            leftChildren.forEach((c) => {
+              const ch = subtreeH.get(c.id);
+              placeBranch(c, -rootSz.w / 2 - H_GAP - 10, cy + ch / 2, "left", 1);
+              cy += ch + V_GAP + 6;
+            });
+          }
+        }
+
+        // 4. 应用节点位置、绑定交互与折叠按钮
+        domMap.forEach(({ div, span, depth }, id) => {
+          const r = state.nodeRects.get(id);
+          const node = state.layoutNodes.get(id);
+          div.style.left = `${r.x}px`;
+          div.style.top = `${r.y}px`;
+
+          // 折叠/展开按钮
+          if (depth > 0 && node.children.length > 0) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = `collapse-btn ${r.side === "left" ? "side-left" : "side-right"}`;
+            btn.textContent = node.collapsed ? String(countDescendants(node)) : "−";
+            btn.title = node.collapsed ? "展开分支" : "折叠分支";
+            btn.addEventListener("mousedown", (e) => e.stopPropagation());
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              node.collapsed = !node.collapsed;
+              persist();
+              render();
+            });
+            div.appendChild(btn);
+          }
+
+          div.addEventListener("mousedown", (e) => {
+            e.stopPropagation();
+            if (state.editingId && state.editingId !== id) {
+              commitEdit();
+            }
+            if (state.selectedId !== id) {
+              state.selectedId = id;
+              render();
+            }
+          });
+
+          div.addEventListener("dblclick", (e) => {
+            e.stopPropagation();
+            startEdit(id);
+          });
+
+          // 如果当前正在编辑该节点
+          if (state.editingId === id) {
+            span.contentEditable = "true";
+            setTimeout(() => {
+              span.focus();
+              const sel = window.getSelection();
+              const range = document.createRange();
+              range.selectNodeContents(span);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }, 0);
+
+            span.addEventListener("keydown", (e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                e.stopPropagation();
+                commitEdit();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                state.editingId = null;
+                render();
+              } else if (e.key === "Tab") {
+                e.preventDefault();
+                e.stopPropagation();
+                commitEdit();
+                addChildNode();
+              }
+            });
+
+            span.addEventListener("blur", () => {
+              if (state.editingId === id) commitEdit();
+            });
+          }
+        });
+
+        // 5. 绘制平滑贝塞尔连线
+        function drawEdges(parent) {
+          if (parent.collapsed) return;
+          const pr = state.nodeRects.get(parent.id);
+          if (!pr) return;
+
+          parent.children.forEach((child) => {
+            const cr = state.nodeRects.get(child.id);
+            if (!cr) return;
+            const isLeft = cr.side === "left";
+            const x1 = isLeft ? pr.x : pr.x + pr.w;
+            const y1 = pr.y + pr.h / 2;
+            const x2 = isLeft ? cr.x + cr.w : cr.x;
+            const y2 = cr.y + cr.h / 2;
+            const dx = Math.abs(x2 - x1) * 0.52;
+            const c1x = isLeft ? x1 - dx : x1 + dx;
+            const c2x = isLeft ? x2 + dx : x2 - dx;
+
+            const path = document.createElementNS(SVG_NS, "path");
+            path.setAttribute("d", `M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}`);
+            path.setAttribute("fill", "none");
+            path.setAttribute("stroke", child.color || "var(--line-default)");
+            path.setAttribute("stroke-width", pr.depth === 0 ? "2.4" : "1.8");
+            path.setAttribute("stroke-linecap", "round");
+            edgesSvg.appendChild(path);
+
+            drawEdges(child);
+          });
+        }
+        drawEdges(state.root);
+
+        updateToolbarState();
+      }
+
+      function updateToolbarState() {
+        const isRoot = state.selectedId === "root";
+        addSiblingBtn.disabled = isRoot;
+        deleteBtn.disabled = isRoot;
+        undoBtn.disabled = state.undoStack.length === 0;
+        redoBtn.disabled = state.redoStack.length === 0;
+        layoutBtn.textContent = state.layout === "right" ? "布局：向右" : "布局：双向";
+        themeBtn.textContent = `主题：${THEMES[state.themeIdx].label}`;
+      }
+
+      // ==================== 节点编辑与增删改 ====================
+      function startEdit(id) {
+        state.selectedId = id;
+        state.editingId = id;
+        render();
+      }
+
+      function commitEdit() {
+        if (!state.editingId) return;
+        const id = state.editingId;
+        const el = nodesLayer.querySelector(`.mm-node[data-id="${id}"] .mm-node-text`);
+        const found = findNodeAndParent(id);
+        state.editingId = null;
+        if (el && found) {
+          const nextText = el.innerText.trim() || (id === "root" ? "中心主题" : "分支主题");
+          if (nextText !== found.node.text) {
+            pushHistory();
+            found.node.text = nextText;
+            persist();
+          }
+        }
+        render();
+      }
+
+      function addChildNode() {
+        const found = findNodeAndParent(state.selectedId);
+        if (!found) return;
+        pushHistory();
+        found.node.collapsed = false;
+        const child = {
+          id: uid(),
+          text: "新节点",
+          color: found.node.id === "root" ? "" : found.node.color,
+          collapsed: false,
+          children: []
+        };
+        found.node.children.push(child);
+        state.selectedId = child.id;
+        state.editingId = child.id;
+        persist();
+        render();
+      }
+
+      function addSiblingNode() {
+        const found = findNodeAndParent(state.selectedId);
+        if (!found || !found.parent) return;
+        pushHistory();
+        const sibling = {
+          id: uid(),
+          text: "新节点",
+          color: found.node.color,
+          collapsed: false,
+          children: []
+        };
+        const idx = found.parent.children.findIndex((c) => c.id === found.node.id);
+        found.parent.children.splice(idx + 1, 0, sibling);
+        state.selectedId = sibling.id;
+        state.editingId = sibling.id;
+        persist();
+        render();
+      }
+
+      function deleteSelectedNode() {
+        const found = findNodeAndParent(state.selectedId);
+        if (!found || !found.parent) return;
+        pushHistory();
+        const idx = found.parent.children.findIndex((c) => c.id === found.node.id);
+        found.parent.children.splice(idx, 1);
+        if (found.parent.children.length > 0) {
+          state.selectedId = found.parent.children[Math.max(0, idx - 1)].id;
+        } else {
+          state.selectedId = found.parent.id;
+        }
+        state.editingId = null;
+        persist();
+        render();
+      }
+
+      function setSelectedColor(color) {
+        const found = findNodeAndParent(state.selectedId);
+        if (!found) return;
+        pushHistory();
+        found.node.color = color;
+        persist();
+        render();
+      }
+
+      // ==================== 键盘导航 ====================
+      document.addEventListener("keydown", (e) => {
+        if (state.editingId) return;
+        const meta = e.metaKey || e.ctrlKey;
+
+        if (meta && e.key.toLowerCase() === "z") {
+          e.preventDefault();
+          if (e.shiftKey) redo();
+          else undo();
+          return;
+        }
+
+        if (e.key === "Tab") {
+          e.preventDefault();
+          addChildNode();
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          if (state.selectedId === "root") addChildNode();
+          else addSiblingNode();
+        } else if (e.key === "Backspace" || e.key === "Delete") {
+          e.preventDefault();
+          deleteSelectedNode();
+        } else if (e.key === " " || e.key === "F2") {
+          e.preventDefault();
+          startEdit(state.selectedId);
+        } else if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+          e.preventDefault();
+          navigateByArrow(e.key);
+        }
+      });
+
+      function navigateByArrow(key) {
+        const found = findNodeAndParent(state.selectedId);
+        if (!found) return;
+        const rect = state.nodeRects.get(state.selectedId);
+        if (!rect) return;
+
+        if (key === "ArrowUp" || key === "ArrowDown") {
+          if (!found.parent) return;
+          const siblings = found.parent.children;
+          const idx = siblings.findIndex((c) => c.id === found.node.id);
+          const nextIdx = key === "ArrowUp" ? idx - 1 : idx + 1;
+          if (siblings[nextIdx]) {
+            state.selectedId = siblings[nextIdx].id;
+            render();
+          }
+        } else if (key === "ArrowRight") {
+          if (rect.side === "left" && found.parent) {
+            state.selectedId = found.parent.id;
+            render();
+          } else if (!found.node.collapsed && found.node.children.length) {
+            state.selectedId = found.node.children[0].id;
+            render();
+          }
+        } else if (key === "ArrowLeft") {
+          if (rect.side === "right" && found.parent) {
+            state.selectedId = found.parent.id;
+            render();
+          } else if (rect.side === "center" && !found.node.collapsed) {
+            const leftChild = found.node.children.find(
+              (c) => state.nodeRects.get(c.id)?.side === "left"
+            );
+            if (leftChild) {
+              state.selectedId = leftChild.id;
+              render();
+            }
+          } else if (rect.side === "left" && !found.node.collapsed && found.node.children.length) {
+            state.selectedId = found.node.children[0].id;
+            render();
+          }
+        }
+      }
+
+      // ==================== 画布拖拽与滚轮缩放 ====================
+      let isPanning = false;
+      let panStartX = 0;
+      let panStartY = 0;
+
+      viewport.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        fileMenu.classList.remove("open");
+        if (state.editingId) commitEdit();
+        isPanning = true;
+        panStartX = e.clientX - state.panX;
+        panStartY = e.clientY - state.panY;
+        viewport.classList.add("panning");
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        if (!isPanning) return;
+        state.panX = e.clientX - panStartX;
+        state.panY = e.clientY - panStartY;
+        applyTransform();
+      });
+
+      window.addEventListener("mouseup", () => {
+        isPanning = false;
+        viewport.classList.remove("panning");
+      });
+
+      viewport.addEventListener(
+        "wheel",
+        (e) => {
+          e.preventDefault();
+          if (e.ctrlKey || e.metaKey) {
+            const factor = e.deltaY < 0 ? 1.09 : 0.92;
+            zoomAt(e.clientX, e.clientY, state.scale * factor);
+          } else {
+            state.panX -= e.deltaX;
+            state.panY -= e.deltaY;
+            applyTransform();
+          }
+        },
+        { passive: false }
+      );
+
+      function zoomAt(clientX, clientY, nextScale) {
+        const clamped = Math.max(0.25, Math.min(2.5, nextScale));
+        const wx = (clientX - state.panX) / state.scale;
+        const wy = (clientY - state.panY) / state.scale;
+        state.scale = clamped;
+        state.panX = clientX - wx * state.scale;
+        state.panY = clientY - wy * state.scale;
+        applyTransform();
+      }
+
+      // ==================== 导出工具（PNG / SVG / MD / JSON） ====================
+      function downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+
+      function getBounds() {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        state.nodeRects.forEach((r) => {
+          minX = Math.min(minX, r.x);
+          maxX = Math.max(maxX, r.x + r.w);
+          minY = Math.min(minY, r.y);
+          maxY = Math.max(maxY, r.y + r.h);
+        });
+        const pad = 60;
+        return {
+          x: minX - pad,
+          y: minY - pad,
+          w: maxX - minX + pad * 2,
+          h: maxY - minY + pad * 2
+        };
+      }
+
+      function exportPNG() {
+        const b = getBounds();
+        const dpr = 2;
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(b.w * dpr);
+        canvas.height = Math.ceil(b.h * dpr);
+        const ctx = canvas.getContext("2d");
+        ctx.scale(dpr, dpr);
+
+        const cs = getComputedStyle(document.body);
+        const bg = cs.getPropertyValue("--canvas-bg").trim();
+        const nodeBg = cs.getPropertyValue("--node-bg").trim();
+        const nodeBorder = cs.getPropertyValue("--node-border").trim();
+        const rootBg = cs.getPropertyValue("--root-bg").trim();
+        const rootInk = cs.getPropertyValue("--root-ink").trim();
+        const ink = cs.getPropertyValue("--ink").trim();
+        const lineDefault = cs.getPropertyValue("--line-default").trim();
+
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, b.w, b.h);
+        ctx.translate(-b.x, -b.y);
+
+        // 1. 画连线
+        function drawCanvasEdges(parent) {
+          if (parent.collapsed) return;
+          const pr = state.nodeRects.get(parent.id);
+          if (!pr) return;
+          parent.children.forEach((child) => {
+            const cr = state.nodeRects.get(child.id);
+            if (!cr) return;
+            const isLeft = cr.side === "left";
+            const x1 = isLeft ? pr.x : pr.x + pr.w;
+            const y1 = pr.y + pr.h / 2;
+            const x2 = isLeft ? cr.x + cr.w : cr.x;
+            const y2 = cr.y + cr.h / 2;
+            const dx = Math.abs(x2 - x1) * 0.52;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.bezierCurveTo(isLeft ? x1 - dx : x1 + dx, y1, isLeft ? x2 + dx : x2 - dx, y2, x2, y2);
+            ctx.strokeStyle = child.color || lineDefault;
+            ctx.lineWidth = pr.depth === 0 ? 2.4 : 1.8;
+            ctx.stroke();
+            drawCanvasEdges(child);
+          });
+        }
+        drawCanvasEdges(state.root);
+
+        // 2. 画节点
+        function roundRectPath(x, y, w, h, r) {
+          ctx.beginPath();
+          ctx.moveTo(x + r, y);
+          ctx.arcTo(x + w, y, x + w, y + h, r);
+          ctx.arcTo(x + w, y + h, x, y + h, r);
+          ctx.arcTo(x, y + h, x, y, r);
+          ctx.arcTo(x, y, x + w, y, r);
+          ctx.closePath();
+        }
+
+        state.nodeRects.forEach((r, id) => {
+          const node = state.layoutNodes.get(id);
+          const isRoot = r.depth === 0;
+          roundRectPath(r.x, r.y, r.w, r.h, isRoot ? 14 : 11);
+          ctx.fillStyle = isRoot ? (node.color || rootBg) : nodeBg;
+          ctx.fill();
+          if (!isRoot) {
+            ctx.strokeStyle = node.color || nodeBorder;
+            ctx.lineWidth = 1.6;
+            ctx.stroke();
+          }
+          ctx.fillStyle = isRoot ? rootInk : ink;
+          ctx.font = `${isRoot ? "700 17px" : r.depth === 1 ? "600 15px" : "500 14px"} -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
+          ctx.textBaseline = "middle";
+          ctx.fillText(node.text, r.x + (isRoot ? 24 : 16), r.y + r.h / 2);
+        });
+
+        canvas.toBlob((blob) => {
+          if (blob) downloadBlob(blob, `${state.root.text || "思维导图"}.png`);
+          showToast("已导出高清 PNG 图片");
+        }, "image/png");
+      }
+
+      function exportSVG() {
+        const b = getBounds();
+        const cs = getComputedStyle(document.body);
+        const bg = cs.getPropertyValue("--canvas-bg").trim();
+        const nodeBg = cs.getPropertyValue("--node-bg").trim();
+        const nodeBorder = cs.getPropertyValue("--node-border").trim();
+        const rootBg = cs.getPropertyValue("--root-bg").trim();
+        const rootInk = cs.getPropertyValue("--root-ink").trim();
+        const ink = cs.getPropertyValue("--ink").trim();
+        const lineDefault = cs.getPropertyValue("--line-default").trim();
+
+        const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        let paths = "";
+        function collectEdges(parent) {
+          if (parent.collapsed) return;
+          const pr = state.nodeRects.get(parent.id);
+          if (!pr) return;
+          parent.children.forEach((child) => {
+            const cr = state.nodeRects.get(child.id);
+            if (!cr) return;
+            const isLeft = cr.side === "left";
+            const x1 = isLeft ? pr.x : pr.x + pr.w;
+            const y1 = pr.y + pr.h / 2;
+            const x2 = isLeft ? cr.x + cr.w : cr.x;
+            const y2 = cr.y + cr.h / 2;
+            const dx = Math.abs(x2 - x1) * 0.52;
+            paths += `<path d="M ${x1} ${y1} C ${isLeft ? x1 - dx : x1 + dx} ${y1}, ${isLeft ? x2 + dx : x2 - dx} ${y2}, ${x2} ${y2}" fill="none" stroke="${child.color || lineDefault}" stroke-width="${pr.depth === 0 ? 2.4 : 1.8}" stroke-linecap="round"/>`;
+            collectEdges(child);
+          });
+        }
+        collectEdges(state.root);
+
+        let rects = "";
+        state.nodeRects.forEach((r, id) => {
+          const node = state.layoutNodes.get(id);
+          const isRoot = r.depth === 0;
+          const fill = isRoot ? (node.color || rootBg) : nodeBg;
+          const stroke = isRoot ? "none" : (node.color || nodeBorder);
+          const textColor = isRoot ? rootInk : ink;
+          const fs = isRoot ? 17 : r.depth === 1 ? 15 : 14;
+          const fw = isRoot ? 700 : r.depth === 1 ? 600 : 500;
+          rects += `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="${isRoot ? 14 : 11}" fill="${fill}" stroke="${stroke}" stroke-width="1.6"/>`;
+          rects += `<text x="${r.x + (isRoot ? 24 : 16)}" y="${r.y + r.h / 2}" dominant-baseline="central" font-family="-apple-system, BlinkMacSystemFont, PingFang SC, sans-serif" font-size="${fs}" font-weight="${fw}" fill="${textColor}">${esc(node.text)}</text>`;
+        });
+
+        const svgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${b.x} ${b.y} ${b.w} ${b.h}" width="${b.w}" height="${b.h}"><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="${bg}"/>${paths}${rects}</svg>`;
+        downloadBlob(new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" }), `${state.root.text || "思维导图"}.svg`);
+        showToast("已导出 SVG 矢量图");
+      }
+
+      function exportMarkdown() {
+        const lines = [`# ${state.root.text}`, ""];
+        function walk(node, depth) {
+          node.children.forEach((c) => {
+            lines.push(`${"  ".repeat(depth)}- ${c.text}`);
+            walk(c, depth + 1);
+          });
+        }
+        walk(state.root, 0);
+        downloadBlob(
+          new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" }),
+          `${state.root.text || "思维导图"}.md`
+        );
+        showToast("已导出 Markdown 大纲");
+      }
+
+      function exportJSON() {
+        downloadBlob(
+          new Blob([JSON.stringify(state.root, null, 2)], { type: "application/json;charset=utf-8" }),
+          `${state.root.text || "思维导图"}.json`
+        );
+        showToast("已保存 JSON 项目文件");
+      }
+
+      // ==================== 顶部按钮绑定 ====================
+      addChildBtn.addEventListener("click", addChildNode);
+      addSiblingBtn.addEventListener("click", addSiblingNode);
+      deleteBtn.addEventListener("click", deleteSelectedNode);
+      undoBtn.addEventListener("click", undo);
+      redoBtn.addEventListener("click", redo);
+
+      document.querySelectorAll(".c-dot").forEach((dot) => {
+        dot.addEventListener("click", () => setSelectedColor(dot.dataset.color));
+      });
+
+      layoutBtn.addEventListener("click", () => {
+        state.layout = state.layout === "right" ? "both" : "right";
+        persist();
+        render();
+        centerView(false);
+      });
+
+      themeBtn.addEventListener("click", () => {
+        state.themeIdx = (state.themeIdx + 1) % THEMES.length;
+        document.body.dataset.theme = THEMES[state.themeIdx].key;
+        persist();
+        updateToolbarState();
+      });
+
+      menuBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        fileMenu.classList.toggle("open");
+      });
+
+      document.addEventListener("click", () => fileMenu.classList.remove("open"));
+
+      document.getElementById("newMapBtn").addEventListener("click", () => {
+        if (state.root.children.length > 0 && !confirm("确定清空当前内容，新建一张空白导图吗？")) return;
+        pushHistory();
+        state.root = createBlankRoot();
+        state.selectedId = "root";
+        state.editingId = null;
+        persist();
+        render();
+        centerView(true);
+        showToast("已新建空白导图");
+      });
+
+      document.getElementById("exportPngBtn").addEventListener("click", exportPNG);
+      document.getElementById("exportSvgBtn").addEventListener("click", exportSVG);
+      document.getElementById("exportMdBtn").addEventListener("click", exportMarkdown);
+      document.getElementById("exportJsonBtn").addEventListener("click", exportJSON);
+
+      const jsonInput = document.getElementById("jsonFileInput");
+      document.getElementById("importJsonBtn").addEventListener("click", () => jsonInput.click());
+      jsonInput.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const parsed = JSON.parse(reader.result);
+            if (!parsed || !parsed.id || !Array.isArray(parsed.children)) throw new Error();
+            pushHistory();
+            state.root = parsed;
+            state.selectedId = parsed.id;
+            state.editingId = null;
+            persist();
+            render();
+            centerView(true);
+            showToast("已导入思维导图");
+          } catch {
+            showToast("JSON 文件格式不正确");
+          }
+        };
+        reader.readAsText(file);
+        jsonInput.value = "";
+      });
+
+      document.getElementById("zoomInBtn").addEventListener("click", () =>
+        zoomAt(viewport.clientWidth / 2, viewport.clientHeight / 2, state.scale * 1.15)
+      );
+      document.getElementById("zoomOutBtn").addEventListener("click", () =>
+        zoomAt(viewport.clientWidth / 2, viewport.clientHeight / 2, state.scale * 0.87)
+      );
+      zoomLabel.addEventListener("click", () => centerView(true));
+      document.getElementById("fitBtn").addEventListener("click", () => centerView(false));
+
+      // ==================== 启动 ====================
+      loadPersisted();
+      document.body.dataset.theme = THEMES[state.themeIdx].key;
+      render();
+      centerView(true);
+    })();
+  </script>
+
+
+</body></html>
